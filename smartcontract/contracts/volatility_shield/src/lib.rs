@@ -1,5 +1,7 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, Address, Env, String, Symbol, Vec,
+};
 
 // ─── Storage Keys ────────────────────────────────────────────────────────────
 
@@ -47,6 +49,18 @@ pub struct VycRecord {
     pub status: VycStatus,
     pub created_at: u64,
     pub updated_at: u64,
+}
+
+/// Errors returned by minting (issue #7).
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum MintError {
+    NotInitialized = 1,
+    Unauthorized = 2,
+    ScoreOutOfRange = 3,
+    InvalidYield = 4,
+    InvalidActivityHash = 5,
 }
 
 // ─── Contract ────────────────────────────────────────────────────────────────
@@ -110,25 +124,42 @@ impl AgriTrust {
         crop: Symbol,
         region: Symbol,
         activity_hash: String,
-    ) -> u64 {
+    ) -> Result<u64, MintError> {
         admin.require_auth();
 
         let stored_admin: Address = env
             .storage()
             .instance()
             .get(&DataKey::Admin)
-            .unwrap_or_else(|| panic!("Not initialised"));
+            .ok_or(MintError::NotInitialized)?;
 
         if admin != stored_admin {
-            panic!("Unauthorized: only admin can mint VYCs");
+            return Err(MintError::Unauthorized);
         }
 
         if score > 100 {
-            panic!("Score must be 0-100");
+            return Err(MintError::ScoreOutOfRange);
         }
 
         if expected_yield <= 0 {
-            panic!("Expected yield must be positive");
+            return Err(MintError::InvalidYield);
+        }
+
+        // activity_hash must be a 64-char lowercase hex SHA-256 string
+        // (see hashActivityPayload in the backend scoring service).
+        // Length gate FIRST: copy_into_slice requires an exactly-sized
+        // buffer, so a short/long hash must be rejected before copying.
+        // (hex chars are ASCII so bytes == chars here)
+        if activity_hash.len() != 64 {
+            return Err(MintError::InvalidActivityHash);
+        }
+        let mut hash_bytes = [0u8; 64];
+        activity_hash.copy_into_slice(&mut hash_bytes);
+        if !hash_bytes
+            .iter()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(MintError::InvalidActivityHash);
         }
 
         // Increment the global VYC counter to get a unique ID.
@@ -175,7 +206,7 @@ impl AgriTrust {
             (new_id, score, expected_yield, crop, region, now),
         );
 
-        new_id
+        Ok(new_id)
     }
 
     // ── Query ──────────────────────────────────────────────────────────────
@@ -185,6 +216,34 @@ impl AgriTrust {
     }
 
     /// Returns all VYC IDs for a given farmer address.
+    /// Token-style metadata: human-readable certificate name.
+    pub fn name(env: Env) -> String {
+        String::from_str(&env, "AgriTrust Yield Certificate")
+    }
+
+    /// Token-style metadata: ticker symbol for the VYC asset.
+    pub fn symbol(env: Env) -> Symbol {
+        Symbol::new(&env, "VYC")
+    }
+
+    /// Full VYC records for one farmer — the frontend "My certificates" list
+    /// uses this so it renders without N+1 `get_vyc` reads per id.
+    pub fn get_farmer_vyc_records(env: Env, farmer: Address) -> Vec<VycRecord> {
+        let ids: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::FarmerVycs(farmer))
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut records = Vec::new(&env);
+        for id in ids.iter() {
+            if let Some(vyc) = env.storage().persistent().get(&DataKey::Vyc(id)) {
+                records.push_back(vyc);
+            }
+        }
+        records
+    }
+
     pub fn get_farmer_vycs(env: Env, farmer: Address) -> Vec<u64> {
         env.storage()
             .persistent()

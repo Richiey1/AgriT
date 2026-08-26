@@ -184,12 +184,23 @@ impl AgriTrust {
         score: u32,           // FluxID credit score (0-100)
         expected_yield: i128, // expected harvest value in micro-USDC
         crop: Symbol,         // "MAIZE", "COCOA", "SOYBEAN"...
-        region: Symbol,       // ISO 3166-2, e.g. "NG-LA"
+        region: Symbol,       // region code, e.g. "NGLA"
         activity_hash: String, // SHA-256 of the proof-of-activity payload
-    ) -> u64 { /* mints a VYC and returns its id */ }
+                               // MUST be 64-char lowercase hex — invalid input
+                               // returns MintError::InvalidActivityHash
+    ) -> Result<u64, MintError> { /* mints a VYC and returns its id */ }
 
+    pub fn name(env: Env) -> String {
+        // "AgriTrust Yield Certificate"
+    }
+    pub fn symbol(env: Env) -> Symbol {
+        // "VYC"
+    }
     pub fn get_vyc(env: Env, id: u64) -> Option<VycRecord> { /* read one VYC */ }
     pub fn get_farmer_vycs(env: Env, farmer: Address) -> Vec<u64> { /* ids per farmer */ }
+    /// Full records for a farmer — lets the frontend render "My certificates"
+    /// with a single call instead of N+1 `get_vyc` reads.
+    pub fn get_farmer_vyc_records(env: Env, farmer: Address) -> Vec<VycRecord> { /* full VycRecords */ }
     pub fn get_vyc_count(env: Env) -> u64 { /* total minted */ }
 
     pub fn update_status(env: Env, admin: Address, id: u64, new_status: VycStatus) {
@@ -197,6 +208,21 @@ impl AgriTrust {
     }
 }
 ```
+
+### Input Validation & Errors (issue #7)
+
+`mint_vyc` returns `Result<u64, MintError>` instead of panicking:
+
+| Variant | When |
+|---|---|
+| `NotInitialized` | Contract has no admin set |
+| `Unauthorized` | Caller is not the stored admin |
+| `ScoreOutOfRange` | Score above 100 |
+| `InvalidYield` | Expected yield ≤ 0 |
+| `InvalidActivityHash` | Hash is not 64-char lowercase hex |
+
+Clients should use the generated `try_mint_vyc(...)` which returns the error
+instead of aborting.
 
 ### Deploy & invoke outline
 ```bash
