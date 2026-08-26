@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import { appConfig } from './config/app.config.js';
 import { registerAdminRoutes } from './routes/admin.routes.js';
 import { healthRoute } from './routes/health.routes.js';
+import { registerActivityRoutes } from './routes/activity.routes.js';
 import { registerScoreRoutes } from './routes/score.routes.js';
 import { registerVycRoutes } from './routes/vyc.routes.js';
 import { logger } from './utils/logger.js';
@@ -36,6 +37,7 @@ export async function buildServer() {
   }));
 
   fastify.get('/health', healthRoute);
+  await registerActivityRoutes(fastify);
   await registerVycRoutes(fastify);
   await registerScoreRoutes(fastify);
   await registerAdminRoutes(fastify);
