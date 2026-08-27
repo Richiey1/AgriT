@@ -31,6 +31,30 @@ describe('POST /activities (USSD activity logging)', () => {
     expect(res.json()).toEqual({ ok: 1, id: 1 });
   });
 
+  it('accepts an optional amount and stores it for scoring', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/activities',
+      payload: { farmer_id: 'farmer-amt', type: 'planting', date: '2026-08-01', amount: 2500 },
+    });
+    expect(res.statusCode).toBe(201);
+
+    const listing = await app.inject({ method: 'GET', url: '/farmers/farmer-amt/activities' });
+    const body = listing.json();
+    expect(body.activities[0].amt).toBe(2500);
+  });
+
+  it('rejects a negative amount with 400 (error code 4)', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/activities',
+      payload: { farmer_id: 'farmer-1', type: 'sale', date: '2026-08-01', amount: -5 },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().e).toBe(4);
+  });
+
   it.each(['weeding', 'unknown', 'PLANTING'])('rejects unknown event type %s with 400', async (type) => {
     const res = await app.inject({
       method: 'POST',
@@ -39,7 +63,7 @@ describe('POST /activities (USSD activity logging)', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ e: 1 });
+    expect(res.json()).toMatchObject({ e: 1 });
   });
 
   it('rejects a missing or malformed date with 400', async () => {
@@ -49,6 +73,7 @@ describe('POST /activities (USSD activity logging)', () => {
       payload: { farmer_id: 'farmer-1', type: 'harvest' },
     });
     expect(missing.statusCode).toBe(400);
+    expect(missing.json().e).toBe(2);
 
     const bad = await app.inject({
       method: 'POST',
@@ -56,15 +81,30 @@ describe('POST /activities (USSD activity logging)', () => {
       payload: { farmer_id: 'farmer-1', type: 'harvest', date: 'not-a-date' },
     });
     expect(bad.statusCode).toBe(400);
+    expect(bad.json().e).toBe(2);
   });
 
-  it('rejects a missing farmer id with 400', async () => {
+  it.each(['08/01/2026', '2026', '2026-13-40', '2026-08-01T00:00:00Z'])(
+    'rejects non-ISO date %s with 400',
+    async (date) => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/activities',
+        payload: { farmer_id: 'farmer-1', type: 'harvest', date },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().e).toBe(2);
+    }
+  );
+
+  it('rejects a missing farmer id with 400 (error code 3)', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/activities',
       payload: { type: 'sale', date: '2026-08-01' },
     });
     expect(res.statusCode).toBe(400);
+    expect(res.json().e).toBe(3);
   });
 
   it('stores events per farmer so scoring can query them later', async () => {

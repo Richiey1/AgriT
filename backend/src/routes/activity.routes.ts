@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import {
   isAllowedActivityType,
+  isIsoDate,
   logActivity,
   getActivitiesForFarmer,
 } from '../services/activity.service.js';
@@ -10,26 +11,31 @@ import {
  *
  * Responses are intentionally tiny — a farmer's phone pays for every byte:
  *   success: {"ok":1,"id":7}
- *   failure: {"e":1} (or {"e":"reason"} where the reason matters)
+ *   failure: {"e":<code>,"detail":"reason"} — single numeric-code convention
+ *            so USSD clients can branch on one field.
+ *   error codes: 1 invalid type | 2 invalid/missing date | 3 missing farmer id
+ *                4 invalid amount
  */
 export async function registerActivityRoutes(fastify: FastifyInstance) {
   fastify.post<{
-    Body: { farmer_id?: string; type?: string; date?: string };
+    Body: { farmer_id?: string; type?: string; date?: string; amount?: number };
   }>('/activities', async (request, reply) => {
-    const { farmer_id, type, date } = request.body ?? {};
+    const { farmer_id, type, date, amount } = request.body ?? {};
 
     if (!farmer_id || typeof farmer_id !== 'string') {
-      return reply.code(400).send({ e: 'farmer_id required' });
+      return reply.code(400).send({ e: 3, detail: 'farmer_id required' });
     }
     if (!type || !isAllowedActivityType(type)) {
-      return reply.code(400).send({ e: 1 });
+      return reply.code(400).send({ e: 1, detail: 'unknown activity type' });
     }
-    const parsedDate = new Date(date ?? '');
-    if (!date || Number.isNaN(parsedDate.getTime())) {
-      return reply.code(400).send({ e: 'invalid date' });
+    if (!date || typeof date !== 'string' || !isIsoDate(date)) {
+      return reply.code(400).send({ e: 2, detail: 'date must be YYYY-MM-DD' });
+    }
+    if (amount !== undefined && (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0)) {
+      return reply.code(400).send({ e: 4, detail: 'amount must be a non-negative number' });
     }
 
-    const { id } = logActivity(farmer_id, type, date);
+    const { id } = logActivity(farmer_id, type, date, amount ?? 0);
     return reply.code(201).send({ ok: 1, id });
   });
 
@@ -42,7 +48,7 @@ export async function registerActivityRoutes(fastify: FastifyInstance) {
       return reply.code(200).send({
         ok: 1,
         count: activities.length,
-        activities: activities.map((a) => ({ t: a.type, ts: a.timestamp })),
+        activities: activities.map((a) => ({ t: a.type, ts: a.timestamp, amt: a.amount })),
       });
     }
   );

@@ -5,6 +5,18 @@ import type { ActivityEntry } from '../types/vyc.types.js';
 // door so garbage never reaches the score.
 const ALLOWED_ACTIVITY_TYPES = ['planting', 'harvest', 'sale', 'purchase'] as const;
 
+/** Strict YYYY-MM-DD calendar-date check (rejects 08/01/2026, 2026, 2026-13-40). */
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function isIsoDate(value: string): boolean {
+  if (!ISO_DATE_RE.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
+
 export type ActivityType = (typeof ALLOWED_ACTIVITY_TYPES)[number];
 
 export function isAllowedActivityType(type: string): type is ActivityType {
@@ -27,12 +39,17 @@ export interface LogActivityResult {
 }
 
 /** Logs one activity event for a farmer. Type must pass the allowlist first. */
-export function logActivity(farmerId: string, type: ActivityType, date: string): LogActivityResult {
+export function logActivity(
+  farmerId: string,
+  type: ActivityType,
+  date: string,
+  amount = 0
+): LogActivityResult {
   const entry: StoredActivity = {
     id: nextId++,
     farmerId,
     type,
-    amount: 0,
+    amount,
     timestamp: Math.floor(new Date(date).getTime() / 1000),
     region: '',
   };
