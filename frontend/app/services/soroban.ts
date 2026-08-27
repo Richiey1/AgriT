@@ -177,13 +177,40 @@ export async function mintVyc(params: MintVycParams): Promise<MintResult> {
       }
 
       if (getResponse.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-        // Parse the result to get the VYC ID
-        const result = getResponse.returnValue;
-        const vycId = scValToNative(result!).toString();
+        // mint_vyc now returns Result<u64, MintError>. Soroban serializes a
+        // Result as a two-element vector ["Ok", id] | ["Err", error], so the
+        // bare scValToNative(...).toString() of the old u64 path would yield
+        // garbage like "Ok,5". Unwrap the Result explicitly.
+        const decoded = scValToNative(getResponse.returnValue!);
+
+        if (Array.isArray(decoded) && decoded[0] === "Ok") {
+          return {
+            success: true,
+            vycId: String(decoded[1]),
+            txHash: sendResponse.hash,
+          };
+        }
+
+        if (Array.isArray(decoded) && decoded[0] === "Err") {
+          return {
+            success: false,
+            error: `Mint rejected by contract: ${String(decoded[1])}`,
+            txHash: sendResponse.hash,
+          };
+        }
+
+        // Fallback for a bare u64 return (pre-Result contract).
+        if (decoded !== undefined && decoded !== null) {
+          return {
+            success: true,
+            vycId: String(decoded),
+            txHash: sendResponse.hash,
+          };
+        }
 
         return {
-          success: true,
-          vycId,
+          success: false,
+          error: "Contract returned an empty result",
           txHash: sendResponse.hash,
         };
       } else {

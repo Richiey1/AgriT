@@ -215,7 +215,6 @@ impl AgriTrust {
         env.storage().persistent().get(&DataKey::Vyc(id))
     }
 
-    /// Returns all VYC IDs for a given farmer address.
     /// Token-style metadata: human-readable certificate name.
     pub fn name(env: Env) -> String {
         String::from_str(&env, "AgriTrust Yield Certificate")
@@ -244,6 +243,7 @@ impl AgriTrust {
         records
     }
 
+    /// All VYC IDs for a given farmer address.
     pub fn get_farmer_vycs(env: Env, farmer: Address) -> Vec<u64> {
         env.storage()
             .persistent()
